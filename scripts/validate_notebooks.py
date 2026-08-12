@@ -25,7 +25,11 @@ ALLOWED_TAGS = {
     "solution",
 }
 CELL_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-TASK_MARKER = re.compile(r"(?:задани|задач|бонус)", re.IGNORECASE)
+SECTION = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+TASK_SECTION = re.compile(
+    r"^(?:задани[ея]|задача|бонус(?:ное)? задание)\b", re.IGNORECASE
+)
+REQUIRED_SECTIONS = {"Цели", "Перед началом", "Самопроверка", "Итоги"}
 DEADLINE = re.compile(
     r"(?:дедлайн|deadline|без штрафа|со штрафом|не принимается|"
     r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|"
@@ -58,6 +62,7 @@ def validate(path: Path) -> list[str]:
         problems.append("не указан kernel python3")
 
     cell_ids: set[str] = set()
+    markdown_parts: list[str] = []
     for index, cell in enumerate(notebook["cells"]):
         cell_id = cell.get("id")
         if not isinstance(cell_id, str) or not CELL_ID.fullmatch(cell_id):
@@ -82,10 +87,30 @@ def validate(path: Path) -> list[str]:
             if cell.get("outputs"):
                 problems.append(f"ячейка {index}: сохранён output")
         if cell.get("cell_type") == "markdown":
+            markdown_parts.append(source)
             if source.count("```") % 2:
                 problems.append(f"ячейка {index}: незакрытый блок кода Markdown")
-            if TASK_MARKER.search(source) and DEADLINE.search(source):
-                problems.append(f"ячейка {index}: найден календарный дедлайн")
+
+    markdown = "\n".join(markdown_parts)
+    sections = set(SECTION.findall(markdown))
+    missing_sections = REQUIRED_SECTIONS - sections
+    if missing_sections:
+        problems.append(
+            f"отсутствуют обязательные разделы {sorted(missing_sections)}"
+        )
+    if DEADLINE.search(markdown):
+        problems.append("найден календарный дедлайн")
+
+    task_sections = {
+        section for section in sections if TASK_SECTION.search(section)
+    }
+    seminar_number = int(number)
+    if seminar_number <= 8 and not task_sections:
+        problems.append("не найдено ни одного задания")
+    if seminar_number >= 9 and task_sections:
+        problems.append(
+            f"в справочном семинаре найдены задания {sorted(task_sections)}"
+        )
 
     return problems
 
